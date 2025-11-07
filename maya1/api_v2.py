@@ -29,9 +29,12 @@ GENERATE_TIMEOUT = 60
 # Voice descriptions for OpenAI-compatible API
 VOICE_DESCRIPTIONS = {
     "default": "Natural voice with clear pronunciation",
-    "male": "Male voice in their 30s with american accent",
-    "female": "Female voice in their 30s with american accent",
+    "male": "Male voice in their 30s with American accent",
+    "female": "Female voice in their 30s with American accent",
 }
+
+# Model creation timestamp (set once at module load)
+MODEL_CREATED_AT = int(time.time())
 
 # Load environment variables
 load_dotenv()
@@ -376,7 +379,7 @@ class OpenAIModel(BaseModel):
     """OpenAI model info."""
     id: str
     object: str = "model"
-    created: int = int(time.time())
+    created: int = MODEL_CREATED_AT
     owned_by: str = "maya1"
 
 

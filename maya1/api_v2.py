@@ -2,9 +2,10 @@ import os
 import io
 import wave
 import time
-from typing import Optional
+import asyncio
+from typing import Optional, List, Literal
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
@@ -24,6 +25,16 @@ from .constants import (
 
 # Timeout settings (seconds)
 GENERATE_TIMEOUT = 60
+
+# Voice descriptions for OpenAI-compatible API
+VOICE_DESCRIPTIONS = {
+    "default": "Natural voice with clear pronunciation",
+    "male": "Male voice in their 30s with American accent",
+    "female": "Female voice in their 30s with American accent",
+}
+
+# Model creation timestamp (set once at module load)
+MODEL_CREATED_AT = int(time.time())
 
 # Load environment variables
 load_dotenv()
@@ -179,6 +190,9 @@ async def root():
         "endpoints": {
             "generate": "/v1/tts/generate (POST)",
             "health": "/health (GET)",
+            "openai_speech": "/v1/audio/speech (POST) - OpenAI-compatible",
+            "openai_models": "/v1/models (GET) - OpenAI-compatible",
+            "openai_voices": "/v1/audio/voices (GET) - OpenAI-compatible",
         },
     }
 
@@ -328,6 +342,161 @@ async def _generate_tts_streaming(
     
     except Exception as e:
         print(f"Streaming error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# OpenAI-Compatible Endpoints for Open WebUI Integration
+# ============================================================================
+
+class OpenAISpeechRequest(BaseModel):
+    """OpenAI-compatible TTS request."""
+    model: str = Field(
+        default="maya1-tts",
+        description="Model to use for generation"
+    )
+    input: str = Field(
+        ...,
+        description="Text to synthesize"
+    )
+    voice: str = Field(
+        default="default",
+        description="Voice to use (default, male, female)"
+    )
+    response_format: Literal["wav", "pcm"] = Field(
+        default="wav",
+        description="Audio format (currently only wav and pcm are supported)"
+    )
+    speed: float = Field(
+        default=1.0,
+        description="Playback speed (0.25 to 4.0) - Note: currently not implemented, accepted for compatibility",
+        ge=0.25,
+        le=4.0
+    )
+
+
+class OpenAIModel(BaseModel):
+    """OpenAI model info."""
+    id: str
+    object: str = "model"
+    created: int = MODEL_CREATED_AT
+    owned_by: str = "maya1"
+
+
+class OpenAIModelsResponse(BaseModel):
+    """OpenAI models list response."""
+    object: str = "list"
+    data: List[OpenAIModel]
+
+
+class OpenAIVoice(BaseModel):
+    """OpenAI voice info."""
+    id: str
+    name: str
+    description: str
+
+
+class OpenAIVoicesResponse(BaseModel):
+    """OpenAI voices list response."""
+    voices: List[OpenAIVoice]
+
+
+@app.get("/v1/models", response_model=OpenAIModelsResponse)
+async def list_models():
+    """List available models (OpenAI-compatible)."""
+    return OpenAIModelsResponse(
+        object="list",
+        data=[
+            OpenAIModel(
+                id="maya1-tts",
+                object="model",
+                owned_by="maya1"
+            )
+        ]
+    )
+
+
+@app.get("/v1/audio/voices", response_model=OpenAIVoicesResponse)
+async def list_voices():
+    """List available voices (OpenAI-compatible)."""
+    return OpenAIVoicesResponse(
+        voices=[
+            OpenAIVoice(
+                id="default",
+                name="Default",
+                description=VOICE_DESCRIPTIONS["default"]
+            ),
+            OpenAIVoice(
+                id="male",
+                name="Male",
+                description=VOICE_DESCRIPTIONS["male"]
+            ),
+            OpenAIVoice(
+                id="female",
+                name="Female",
+                description=VOICE_DESCRIPTIONS["female"]
+            ),
+        ]
+    )
+
+
+@app.post("/v1/audio/speech")
+async def create_speech(request: OpenAISpeechRequest):
+    """Generate speech from text (OpenAI-compatible endpoint for Open WebUI)."""
+    
+    try:
+        # Map voice to description using shared constant
+        description = VOICE_DESCRIPTIONS.get(request.voice, VOICE_DESCRIPTIONS["default"])
+        
+        # Generate audio using the existing pipeline
+        audio_bytes = await asyncio.wait_for(
+            pipeline.generate_speech(
+                description=description,
+                text=request.input,
+                temperature=DEFAULT_TEMPERATURE,
+                top_p=DEFAULT_TOP_P,
+                max_tokens=DEFAULT_MAX_TOKENS,
+                repetition_penalty=DEFAULT_REPETITION_PENALTY,
+                seed=None,
+            ),
+            timeout=GENERATE_TIMEOUT
+        )
+        
+        if audio_bytes is None:
+            raise Exception("Audio generation failed")
+        
+        # Handle response formats
+        if request.response_format == "pcm":
+            # Return raw PCM data
+            audio_data = audio_bytes
+            media_type = "audio/pcm"
+            file_ext = "pcm"
+        else:
+            # Create WAV file (default format)
+            wav_buffer = io.BytesIO()
+            with wave.open(wav_buffer, 'wb') as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)
+                wav_file.setframerate(AUDIO_SAMPLE_RATE)
+                wav_file.writeframes(audio_bytes)
+            
+            wav_buffer.seek(0)
+            audio_data = wav_buffer.read()
+            media_type = "audio/wav"
+            file_ext = "wav"
+        
+        return Response(
+            content=audio_data,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f"attachment; filename=speech.{file_ext}"
+            }
+        )
+    
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Generation timeout")
+    except Exception as e:
+        print(f"Error in create_speech: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

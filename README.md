@@ -40,6 +40,8 @@ curl -X POST "http://localhost:8000/v1/tts/generate" \
 
 ## API
 
+### Native API
+
 **Endpoint:** `POST /v1/tts/generate`
 
 **Request:**
@@ -54,6 +56,38 @@ curl -X POST "http://localhost:8000/v1/tts/generate" \
 ```
 
 **Response:** WAV audio file (24kHz, 16-bit mono)
+
+### OpenAI-Compatible API (Open WebUI Integration)
+
+This server is fully compatible with Open WebUI's TTS integration using OpenAI-compatible endpoints.
+
+**List Models:** `GET /v1/models`
+
+**List Voices:** `GET /v1/audio/voices`
+
+**Generate Speech:** `POST /v1/audio/speech`
+
+**Request:**
+```json
+{
+  "model": "maya1-tts",
+  "input": "Hello world",
+  "voice": "default",
+  "response_format": "wav",
+  "speed": 1.0
+}
+```
+
+**Available voices:** `default`, `male`, `female`
+
+**Response formats:** `wav`, `pcm`, `mp3`, `opus`, `aac`, `flac`
+
+#### Open WebUI Configuration
+
+1. In Open WebUI, go to **Admin Panel** → **Settings** → **Audio**
+2. Set **Text-to-Speech Engine** to **"Custom TTS"**
+3. Enter the base URL: `http://localhost:8000/v1` (or your server URL)
+4. Save and test the TTS functionality
 
 ## Emotion Tags
 

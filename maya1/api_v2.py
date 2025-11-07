@@ -2,6 +2,7 @@ import os
 import io
 import wave
 import time
+import asyncio
 from typing import Optional, List, Literal
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse, Response
@@ -24,6 +25,13 @@ from .constants import (
 
 # Timeout settings (seconds)
 GENERATE_TIMEOUT = 60
+
+# Voice descriptions for OpenAI-compatible API
+VOICE_DESCRIPTIONS = {
+    "default": "Natural voice with clear pronunciation",
+    "male": "Male voice in their 30s with american accent",
+    "female": "Female voice in their 30s with american accent",
+}
 
 # Load environment variables
 load_dotenv()
@@ -352,13 +360,13 @@ class OpenAISpeechRequest(BaseModel):
         default="default",
         description="Voice to use (default, male, female)"
     )
-    response_format: Literal["mp3", "opus", "aac", "flac", "wav", "pcm"] = Field(
+    response_format: Literal["wav", "pcm"] = Field(
         default="wav",
-        description="Audio format"
+        description="Audio format (currently only wav and pcm are supported)"
     )
     speed: float = Field(
         default=1.0,
-        description="Playback speed (0.25 to 4.0)",
+        description="Playback speed (0.25 to 4.0) - Note: currently not implemented, accepted for compatibility",
         ge=0.25,
         le=4.0
     )
@@ -413,17 +421,17 @@ async def list_voices():
             OpenAIVoice(
                 id="default",
                 name="Default",
-                description="Default Maya1 voice - natural and expressive"
+                description=VOICE_DESCRIPTIONS["default"]
             ),
             OpenAIVoice(
                 id="male",
                 name="Male",
-                description="Male voice in their 30s with american accent"
+                description=VOICE_DESCRIPTIONS["male"]
             ),
             OpenAIVoice(
                 id="female",
                 name="Female",
-                description="Female voice in their 30s with american accent"
+                description=VOICE_DESCRIPTIONS["female"]
             ),
         ]
     )
@@ -434,18 +442,10 @@ async def create_speech(request: OpenAISpeechRequest):
     """Generate speech from text (OpenAI-compatible endpoint for Open WebUI)."""
     
     try:
-        # Map voice to description
-        voice_descriptions = {
-            "default": "Natural voice with clear pronunciation",
-            "male": "Male voice in their 30s with american accent",
-            "female": "Female voice in their 30s with american accent",
-        }
-        
-        description = voice_descriptions.get(request.voice, voice_descriptions["default"])
+        # Map voice to description using shared constant
+        description = VOICE_DESCRIPTIONS.get(request.voice, VOICE_DESCRIPTIONS["default"])
         
         # Generate audio using the existing pipeline
-        import asyncio
-        
         audio_bytes = await asyncio.wait_for(
             pipeline.generate_speech(
                 description=description,
@@ -462,29 +462,14 @@ async def create_speech(request: OpenAISpeechRequest):
         if audio_bytes is None:
             raise Exception("Audio generation failed")
         
-        # Handle different response formats
-        if request.response_format == "wav":
-            # Create WAV file
-            wav_buffer = io.BytesIO()
-            with wave.open(wav_buffer, 'wb') as wav_file:
-                wav_file.setnchannels(1)
-                wav_file.setsampwidth(2)
-                wav_file.setframerate(AUDIO_SAMPLE_RATE)
-                wav_file.writeframes(audio_bytes)
-            
-            wav_buffer.seek(0)
-            audio_data = wav_buffer.read()
-            media_type = "audio/wav"
-        
-        elif request.response_format == "pcm":
+        # Handle response formats
+        if request.response_format == "pcm":
             # Return raw PCM data
             audio_data = audio_bytes
             media_type = "audio/pcm"
-        
+            file_ext = "pcm"
         else:
-            # For other formats (mp3, opus, aac, flac), we need to convert
-            # For now, we'll return WAV and let the client handle conversion
-            # TODO: Add format conversion using ffmpeg or similar
+            # Create WAV file (default format)
             wav_buffer = io.BytesIO()
             with wave.open(wav_buffer, 'wb') as wav_file:
                 wav_file.setnchannels(1)
@@ -495,12 +480,13 @@ async def create_speech(request: OpenAISpeechRequest):
             wav_buffer.seek(0)
             audio_data = wav_buffer.read()
             media_type = "audio/wav"
+            file_ext = "wav"
         
         return Response(
             content=audio_data,
             media_type=media_type,
             headers={
-                "Content-Disposition": f"attachment; filename=speech.{request.response_format}"
+                "Content-Disposition": f"attachment; filename=speech.{file_ext}"
             }
         )
     

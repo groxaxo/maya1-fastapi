@@ -80,7 +80,7 @@ This server is fully compatible with Open WebUI's TTS integration using OpenAI-c
 
 **Available voices:** `default`, `male`, `female`
 
-**Response formats:** `wav`, `pcm`, `mp3`, `opus`, `aac`, `flac`
+**Response formats:** `wav`, `pcm` (Note: `speed` parameter is accepted for compatibility but not currently implemented)
 
 #### Open WebUI Configuration
 
